@@ -1,4 +1,6 @@
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+import java.net.URI
+import java.io.FileOutputStream
 
 plugins {
   alias(libs.plugins.android.application)
@@ -135,3 +137,24 @@ dependencies {
   "ksp"(libs.androidx.room.compiler)
   "ksp"(libs.moshi.kotlin.codegen)
 }
+
+tasks.register("downloadModel") {
+    val destFile = file("src/main/assets/gesture_recognizer.task")
+    doLast {
+        if (!destFile.exists() || destFile.length() < 1000L) { // catches LFS pointers or empty files
+            println("Downloading gesture_recognizer.task...")
+            destFile.parentFile.mkdirs()
+            URI("https://storage.googleapis.com/mediapipe-tasks/gesture_recognizer/gesture_recognizer.task").toURL().openStream().use { input ->
+                FileOutputStream(destFile).use { output ->
+                    input.copyTo(output)
+                }
+            }
+            println("Download complete.")
+        }
+    }
+}
+
+tasks.named("preBuild") {
+    dependsOn("downloadModel")
+}
+
