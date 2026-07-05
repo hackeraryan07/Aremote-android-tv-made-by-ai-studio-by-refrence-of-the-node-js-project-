@@ -53,8 +53,14 @@ class GestureRecognizerHelper(
         }
 
         val frameTime = SystemClock.uptimeMillis()
-        val bitmapBuffer = try {
-            imageProxy.toBitmap()
+        
+        // Copy out RGB bits from the frame to a bitmap buffer
+        val bitmapBuffer = Bitmap.createBitmap(
+            imageProxy.width, imageProxy.height, Bitmap.Config.ARGB_8888
+        )
+        try {
+            bitmapBuffer.copyPixelsFromBuffer(imageProxy.planes[0].buffer)
+            imageProxy.close()
         } catch (e: Exception) {
             Log.e("GestureRecognizer", "Bitmap conversion failed", e)
             imageProxy.close()
@@ -76,8 +82,6 @@ class GestureRecognizerHelper(
             gestureRecognizer?.recognizeAsync(mpImage, frameTime)
         } catch (e: Exception) {
             gestureListener?.onError("Inference Error: ${e.message}")
-        } finally {
-            imageProxy.close()
         }
     }
 
