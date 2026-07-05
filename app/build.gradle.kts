@@ -141,7 +141,7 @@ dependencies {
 tasks.register("downloadModel") {
     val destFile = file("src/main/assets/gesture_recognizer.task")
     doLast {
-        if (!destFile.exists() || destFile.length() < 1000L) { // catches LFS pointers or empty files
+        if (!destFile.exists() || destFile.length() < 8000000L) { // catches bad files (e.g., 3.6MB)
             println("Downloading gesture_recognizer.task...")
             destFile.parentFile.mkdirs()
             URI("https://storage.googleapis.com/mediapipe-tasks/gesture_recognizer/gesture_recognizer.task").toURL().openStream().use { input ->
