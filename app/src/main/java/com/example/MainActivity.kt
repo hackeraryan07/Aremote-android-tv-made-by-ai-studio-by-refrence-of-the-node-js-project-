@@ -77,7 +77,7 @@ fun TvRemoteApp(viewModel: TvRemoteViewModel = viewModel()) {
     LaunchedEffect(connectionState) {
         if (connectionState == "PAIRING") {
             showPairingDialog = true
-        } else if (connectionState == "CONNECTED") {
+        } else if (connectionState == "CONNECTED" || connectionState == "ERROR" || connectionState == "DISCONNECTED") {
             showPairingDialog = false
         }
     }

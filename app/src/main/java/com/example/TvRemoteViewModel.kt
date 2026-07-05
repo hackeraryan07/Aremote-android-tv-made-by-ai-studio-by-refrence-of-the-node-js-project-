@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -12,7 +13,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 class TvRemoteViewModel(application: Application) : AndroidViewModel(application) {
-    private val _ipAddress = MutableStateFlow("")
+    private val prefs = application.getSharedPreferences("tv_remote_prefs", Context.MODE_PRIVATE)
+    
+    private val _ipAddress = MutableStateFlow(prefs.getString("last_ip", "") ?: "")
     val ipAddress: StateFlow<String> = _ipAddress.asStateFlow()
 
     private val _connectionState = MutableStateFlow(TvConnectionManager.ConnectionState.DISCONNECTED.name)
@@ -21,8 +24,19 @@ class TvRemoteViewModel(application: Application) : AndroidViewModel(application
     private val discoveryManager = TvDiscoveryManager(application)
     val discoveredDevices = discoveryManager.discoveredDevices
 
+    private var collectionJob: Job? = null
+
     init {
         discoveryManager.startDiscovery()
+        
+        TvConnectionManagerInstance.manager?.let { manager ->
+            _ipAddress.value = manager.host
+            startCollecting(manager, application.applicationContext)
+        } ?: run {
+            if (_ipAddress.value.isNotBlank()) {
+                connect(application.applicationContext)
+            }
+        }
     }
 
     override fun onCleared() {
@@ -32,6 +46,7 @@ class TvRemoteViewModel(application: Application) : AndroidViewModel(application
 
     fun updateIpAddress(ip: String) {
         _ipAddress.value = ip
+        prefs.edit().putString("last_ip", ip).apply()
     }
 
     fun sendCommand(command: TvCommand) {
@@ -56,6 +71,26 @@ class TvRemoteViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    private fun startCollecting(manager: TvConnectionManager, context: Context) {
+        collectionJob?.cancel()
+        collectionJob = viewModelScope.launch {
+            manager.connectionState.collect { state ->
+                _connectionState.value = state.name
+                if (state == TvConnectionManager.ConnectionState.CONNECTED) {
+                    val intent = Intent(context, TvConnectionService::class.java)
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                        context.startForegroundService(intent)
+                    } else {
+                        context.startService(intent)
+                    }
+                } else if (state == TvConnectionManager.ConnectionState.DISCONNECTED || state == TvConnectionManager.ConnectionState.ERROR) {
+                    val intent = Intent(context, TvConnectionService::class.java).apply { action = "STOP_SERVICE" }
+                    context.startService(intent)
+                }
+            }
+        }
+    }
+
     fun connect(context: Context) {
         if (_ipAddress.value.isBlank()) return
         
@@ -63,26 +98,25 @@ class TvRemoteViewModel(application: Application) : AndroidViewModel(application
             TvConnectionManagerInstance.manager?.disconnect()
             val manager = TvConnectionManager(_ipAddress.value)
             TvConnectionManagerInstance.manager = manager
+            startCollecting(manager, context)
             
             viewModelScope.launch {
-                manager.connectionState.collect { state ->
-                    _connectionState.value = state.name
-                    if (state == TvConnectionManager.ConnectionState.CONNECTED) {
-                        val intent = Intent(context, TvConnectionService::class.java)
-                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                            context.startForegroundService(intent)
-                        } else {
-                            context.startService(intent)
-                        }
-                    } else if (state == TvConnectionManager.ConnectionState.DISCONNECTED || state == TvConnectionManager.ConnectionState.ERROR) {
-                        val intent = Intent(context, TvConnectionService::class.java).apply { action = "STOP_SERVICE" }
-                        context.startService(intent)
-                    }
+                manager.startPairing()
+            }
+        } else {
+            val manager = TvConnectionManagerInstance.manager!!
+            startCollecting(manager, context)
+            
+            if (manager.connectionState.value == TvConnectionManager.ConnectionState.DISCONNECTED || 
+                manager.connectionState.value == TvConnectionManager.ConnectionState.ERROR) {
+                viewModelScope.launch {
+                    manager.startPairing()
+                }
+            } else if (manager.connectionState.value == TvConnectionManager.ConnectionState.CONNECTED) {
+                viewModelScope.launch {
+                    manager.connectRemote()
                 }
             }
-        }
-        viewModelScope.launch {
-            TvConnectionManagerInstance.manager?.startPairing()
         }
     }
 
