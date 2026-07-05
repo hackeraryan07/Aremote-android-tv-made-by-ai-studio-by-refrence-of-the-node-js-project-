@@ -96,25 +96,28 @@ class TvRemoteViewModel(application: Application) : AndroidViewModel(application
         
         if (TvConnectionManagerInstance.manager == null || TvConnectionManagerInstance.manager?.host != _ipAddress.value) {
             TvConnectionManagerInstance.manager?.disconnect()
-            val manager = TvConnectionManager(_ipAddress.value)
+            val manager = TvConnectionManager(_ipAddress.value, context)
             TvConnectionManagerInstance.manager = manager
             startCollecting(manager, context)
             
             viewModelScope.launch {
-                manager.startPairing()
+                try {
+                    manager.connectRemote()
+                } catch (e: Exception) {
+                    manager.startPairing()
+                }
             }
         } else {
             val manager = TvConnectionManagerInstance.manager!!
             startCollecting(manager, context)
             
-            if (manager.connectionState.value == TvConnectionManager.ConnectionState.DISCONNECTED || 
-                manager.connectionState.value == TvConnectionManager.ConnectionState.ERROR) {
+            if (manager.connectionState.value != TvConnectionManager.ConnectionState.CONNECTED) {
                 viewModelScope.launch {
-                    manager.startPairing()
-                }
-            } else if (manager.connectionState.value == TvConnectionManager.ConnectionState.CONNECTED) {
-                viewModelScope.launch {
-                    manager.connectRemote()
+                    try {
+                        manager.connectRemote()
+                    } catch (e: Exception) {
+                        manager.startPairing()
+                    }
                 }
             }
         }
@@ -124,7 +127,11 @@ class TvRemoteViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             TvConnectionManagerInstance.manager?.sendPairingCode(code)
             delay(500)
-            TvConnectionManagerInstance.manager?.connectRemote()
+            try {
+                TvConnectionManagerInstance.manager?.connectRemote()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
 }

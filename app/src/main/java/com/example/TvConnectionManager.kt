@@ -1,5 +1,7 @@
 package com.example
 
+import android.content.Context
+import android.util.Base64
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -38,10 +40,14 @@ import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder
 import java.math.BigInteger
 import java.security.KeyPair
 import java.security.KeyPairGenerator
+import java.security.KeyFactory
+import java.security.spec.PKCS8EncodedKeySpec
+import java.io.ByteArrayInputStream
+import java.security.cert.CertificateFactory
 import java.util.Date
 import javax.net.ssl.KeyManagerFactory
 
-class TvConnectionManager(val host: String) {
+class TvConnectionManager(val host: String, val context: Context) {
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
@@ -62,24 +68,50 @@ class TvConnectionManager(val host: String) {
     private fun generateCertificate(): SSLContext {
         if (sslContext != null) return sslContext!!
         
-        val keyPairGenerator = KeyPairGenerator.getInstance("RSA")
-        keyPairGenerator.initialize(2048)
-        val keyPair = keyPairGenerator.generateKeyPair()
-
-        val certBuilder = JcaX509v3CertificateBuilder(
-            X500Name("CN=AndroidTVRemote, O=Google, L=MTV, ST=CA, C=US"),
-            BigInteger.valueOf(System.currentTimeMillis()),
-            Date(System.currentTimeMillis() - 1000L * 60 * 60 * 24 * 30),
-            Date(System.currentTimeMillis() + 1000L * 60 * 60 * 24 * 365 * 10),
-            X500Name("CN=AndroidTVRemote, O=Google, L=MTV, ST=CA, C=US"),
-            keyPair.public
-        )
-        val signer = JcaContentSignerBuilder("SHA256WithRSAEncryption").build(keyPair.private)
-        clientCert = JcaX509CertificateConverter().getCertificate(certBuilder.build(signer))
+        val prefs = context.getSharedPreferences("tv_cert_prefs", Context.MODE_PRIVATE)
+        val privateKeyStr = prefs.getString("private_key", null)
+        val certStr = prefs.getString("client_cert", null)
 
         val keyStore = KeyStore.getInstance(KeyStore.getDefaultType())
         keyStore.load(null, null)
-        keyStore.setKeyEntry("key", keyPair.private, "password".toCharArray(), arrayOf(clientCert))
+
+        if (privateKeyStr != null && certStr != null) {
+            try {
+                val kf = KeyFactory.getInstance("RSA")
+                val privateKey = kf.generatePrivate(PKCS8EncodedKeySpec(Base64.decode(privateKeyStr, Base64.DEFAULT)))
+                
+                val cf = CertificateFactory.getInstance("X.509")
+                clientCert = cf.generateCertificate(ByteArrayInputStream(Base64.decode(certStr, Base64.DEFAULT))) as X509Certificate
+                
+                keyStore.setKeyEntry("key", privateKey, "password".toCharArray(), arrayOf(clientCert))
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        if (clientCert == null) {
+            val keyPairGenerator = KeyPairGenerator.getInstance("RSA")
+            keyPairGenerator.initialize(2048)
+            val keyPair = keyPairGenerator.generateKeyPair()
+
+            val certBuilder = JcaX509v3CertificateBuilder(
+                X500Name("CN=AndroidTVRemote, O=Google, L=MTV, ST=CA, C=US"),
+                BigInteger.valueOf(System.currentTimeMillis()),
+                Date(System.currentTimeMillis() - 1000L * 60 * 60 * 24 * 30),
+                Date(System.currentTimeMillis() + 1000L * 60 * 60 * 24 * 365 * 10),
+                X500Name("CN=AndroidTVRemote, O=Google, L=MTV, ST=CA, C=US"),
+                keyPair.public
+            )
+            val signer = JcaContentSignerBuilder("SHA256WithRSAEncryption").build(keyPair.private)
+            clientCert = JcaX509CertificateConverter().getCertificate(certBuilder.build(signer))
+            
+            prefs.edit()
+                .putString("private_key", Base64.encodeToString(keyPair.private.encoded, Base64.DEFAULT))
+                .putString("client_cert", Base64.encodeToString(clientCert!!.encoded, Base64.DEFAULT))
+                .apply()
+                
+            keyStore.setKeyEntry("key", keyPair.private, "password".toCharArray(), arrayOf(clientCert))
+        }
 
         val keyManagerFactory = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm())
         keyManagerFactory.init(keyStore, "password".toCharArray())
@@ -222,7 +254,6 @@ class TvConnectionManager(val host: String) {
     }
 
     suspend fun connectRemote() = withContext(Dispatchers.IO) {
-        if (_connectionState.value != ConnectionState.CONNECTED) return@withContext
         try {
             val context = generateCertificate()
             remoteSocket = context.socketFactory.createSocket(host, 6466) as SSLSocket
@@ -250,8 +281,11 @@ class TvConnectionManager(val host: String) {
                 .build()
             active.writeDelimitedTo(out)
             
+            _connectionState.value = ConnectionState.CONNECTED
         } catch (e: Exception) {
             e.printStackTrace()
+            _connectionState.value = ConnectionState.ERROR
+            throw e
         }
     }
 

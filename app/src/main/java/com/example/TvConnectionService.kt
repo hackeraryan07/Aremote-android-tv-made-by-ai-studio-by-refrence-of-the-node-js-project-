@@ -61,7 +61,7 @@ class TvConnectionService : Service() {
     fun connect(ip: String) {
         if (tvConnectionManager == null || tvConnectionManager?.host != ip) {
             tvConnectionManager?.disconnect()
-            tvConnectionManager = TvConnectionManager(ip)
+            tvConnectionManager = TvConnectionManager(ip, this)
         }
         serviceScope.launch {
             tvConnectionManager?.startPairing()
