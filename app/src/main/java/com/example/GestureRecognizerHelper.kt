@@ -4,10 +4,12 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Matrix
 import android.os.SystemClock
+import android.util.Log
 import androidx.camera.core.ImageProxy
 import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.framework.image.MPImage
 import com.google.mediapipe.tasks.core.BaseOptions
+import com.google.mediapipe.tasks.core.Delegate
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.gesturerecognizer.GestureRecognizer
 import com.google.mediapipe.tasks.vision.gesturerecognizer.GestureRecognizerResult
@@ -24,6 +26,7 @@ class GestureRecognizerHelper(
 
     private fun setupGestureRecognizer() {
         val baseOptionsBuilder = BaseOptions.builder().setModelAssetPath("gesture_recognizer.task")
+        baseOptionsBuilder.setDelegate(Delegate.CPU)
         val baseOptions = baseOptionsBuilder.build()
 
         val optionsBuilder = GestureRecognizer.GestureRecognizerOptions.builder()
@@ -39,13 +42,24 @@ class GestureRecognizerHelper(
             gestureRecognizer = GestureRecognizer.createFromOptions(context, optionsBuilder.build())
         } catch (e: Exception) {
             e.printStackTrace()
-            gestureListener?.onError("Failed to initialize gesture recognizer")
+            gestureListener?.onError("Init Error: ${e.message}")
         }
     }
 
     fun recognizeLiveStream(imageProxy: ImageProxy, isFrontCamera: Boolean) {
+        if (gestureRecognizer == null) {
+            imageProxy.close()
+            return
+        }
+
         val frameTime = SystemClock.uptimeMillis()
-        val bitmapBuffer = imageProxy.toBitmap()
+        val bitmapBuffer = try {
+            imageProxy.toBitmap()
+        } catch (e: Exception) {
+            Log.e("GestureRecognizer", "Bitmap conversion failed", e)
+            imageProxy.close()
+            return
+        }
         
         val matrix = Matrix().apply {
             postRotate(imageProxy.imageInfo.rotationDegrees.toFloat())
@@ -58,9 +72,13 @@ class GestureRecognizerHelper(
         )
 
         val mpImage = BitmapImageBuilder(rotatedBitmap).build()
-        gestureRecognizer?.recognizeAsync(mpImage, frameTime)
-        
-        imageProxy.close()
+        try {
+            gestureRecognizer?.recognizeAsync(mpImage, frameTime)
+        } catch (e: Exception) {
+            gestureListener?.onError("Inference Error: ${e.message}")
+        } finally {
+            imageProxy.close()
+        }
     }
 
     private fun returnLivestreamResult(

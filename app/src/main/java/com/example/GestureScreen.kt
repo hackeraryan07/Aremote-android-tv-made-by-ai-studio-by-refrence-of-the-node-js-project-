@@ -48,28 +48,38 @@ fun GestureScreen(
         object : GestureRecognizerHelper.GestureListener {
             override fun onError(error: String) {
                 Log.e("GestureScreen", "Error: $error")
+                // Update UI on main thread safely
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    recognizedGesture = "Error: $error"
+                }
             }
 
             override fun onResults(result: GestureRecognizerResult) {
-                if (result.gestures().isNotEmpty() && result.gestures()[0].isNotEmpty()) {
-                    val gesture = result.gestures()[0][0].categoryName()
-                    val score = result.gestures()[0][0].score()
-                    if (score > 0.6f && gesture != "None") {
-                        val currentTime = System.currentTimeMillis()
-                        if (currentTime - lastGestureTime > 1500) { // 1.5 second debounce
-                            recognizedGesture = gesture
-                            lastGestureTime = currentTime
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    if (result.gestures().isNotEmpty() && result.gestures()[0].isNotEmpty()) {
+                        val gesture = result.gestures()[0][0].categoryName()
+                        val score = result.gestures()[0][0].score()
+                        
+                        recognizedGesture = "$gesture (${(score * 100).toInt()}%)"
 
-                            when (gesture) {
-                                "Thumb_Up" -> viewModel.sendCommand(TvCommand.UP)
-                                "Thumb_Down" -> viewModel.sendCommand(TvCommand.DOWN)
-                                "Pointing_Up" -> viewModel.sendCommand(TvCommand.VOLUME_UP)
-                                "Closed_Fist" -> viewModel.sendCommand(TvCommand.VOLUME_DOWN)
-                                "Victory" -> viewModel.sendCommand(TvCommand.OK)
-                                "ILoveYou" -> viewModel.sendCommand(TvCommand.HOME)
-                                "Open_Palm" -> viewModel.sendCommand(TvCommand.BACK)
+                        if (score > 0.5f && gesture != "None") {
+                            val currentTime = System.currentTimeMillis()
+                            if (currentTime - lastGestureTime > 1500) { // 1.5 second debounce
+                                lastGestureTime = currentTime
+
+                                when (gesture) {
+                                    "Thumb_Up" -> viewModel.sendCommand(TvCommand.UP)
+                                    "Thumb_Down" -> viewModel.sendCommand(TvCommand.DOWN)
+                                    "Pointing_Up" -> viewModel.sendCommand(TvCommand.VOLUME_UP)
+                                    "Closed_Fist" -> viewModel.sendCommand(TvCommand.VOLUME_DOWN)
+                                    "Victory" -> viewModel.sendCommand(TvCommand.OK)
+                                    "ILoveYou" -> viewModel.sendCommand(TvCommand.HOME)
+                                    "Open_Palm" -> viewModel.sendCommand(TvCommand.BACK)
+                                }
                             }
                         }
+                    } else {
+                        recognizedGesture = "No hand detected"
                     }
                 }
             }
