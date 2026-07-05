@@ -1,0 +1,6 @@
+{
+  "name": "TV Remote",
+  "description": "Android TV Remote Control",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
