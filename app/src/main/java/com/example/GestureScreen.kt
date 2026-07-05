@@ -78,10 +78,18 @@ fun GestureScreen(
 
     val gestureRecognizerHelper = remember { GestureRecognizerHelper(context, gestureListener) }
 
-    DisposableEffect(Unit) {
+    DisposableEffect(lifecycleOwner) {
         onDispose {
             cameraExecutor.shutdown()
             gestureRecognizerHelper.clear()
+            val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+            cameraProviderFuture.addListener({
+                try {
+                    cameraProviderFuture.get().unbindAll()
+                } catch (e: Exception) {
+                    Log.e("GestureScreen", "Failed to unbind camera", e)
+                }
+            }, ContextCompat.getMainExecutor(context))
         }
     }
 
