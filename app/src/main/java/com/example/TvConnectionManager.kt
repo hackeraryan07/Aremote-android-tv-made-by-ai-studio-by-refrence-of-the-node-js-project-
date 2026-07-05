@@ -173,11 +173,9 @@ class TvConnectionManager(val host: String) {
         val exp = pubKey.publicExponent.toByteArray()
         
         // Remove leading zero if present for modulus
-        val finalMod = if (mod[0] == 0.toByte()) mod.copyOfRange(1, mod.size) else mod
-        // Add leading zero for exponent to match node.js behavior
-        val finalExp = ByteArray(exp.size + 1)
-        finalExp[0] = 0
-        System.arraycopy(exp, 0, finalExp, 1, exp.size)
+        val finalMod = if (mod.isNotEmpty() && mod[0] == 0.toByte()) mod.copyOfRange(1, mod.size) else mod
+        // Remove leading zero for exponent if present
+        val finalExp = if (exp.isNotEmpty() && exp[0] == 0.toByte()) exp.copyOfRange(1, exp.size) else exp
         return Pair(finalMod, finalExp)
     }
 
@@ -244,16 +242,12 @@ class TvConnectionManager(val host: String) {
                     .build())
                 .build()
             
-            val lengthBytes = ByteArray(1) { configure.serializedSize.toByte() }
-            out.write(lengthBytes)
-            configure.writeTo(out)
+            configure.writeDelimitedTo(out)
             
             val active = RemoteMessage.newBuilder()
                 .setRemoteSetActive(RemoteSetActive.newBuilder().setActive(622).build())
                 .build()
-            val len2 = ByteArray(1) { active.serializedSize.toByte() }
-            out.write(len2)
-            active.writeTo(out)
+            active.writeDelimitedTo(out)
             
         } catch (e: Exception) {
             e.printStackTrace()
@@ -274,9 +268,7 @@ class TvConnectionManager(val host: String) {
                         .build())
                     .build()
                 val out = remoteSocket!!.outputStream
-                val len = ByteArray(1) { keyMsg.serializedSize.toByte() }
-                out.write(len)
-                keyMsg.writeTo(out)
+                keyMsg.writeDelimitedTo(out)
             } catch (e: Exception) {
                 e.printStackTrace()
             }
