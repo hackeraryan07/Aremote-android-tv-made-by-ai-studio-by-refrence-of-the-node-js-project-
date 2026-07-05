@@ -104,7 +104,12 @@ class TvRemoteViewModel(application: Application) : AndroidViewModel(application
                 try {
                     manager.connectRemote()
                 } catch (e: Exception) {
-                    manager.startPairing()
+                    try {
+                        kotlinx.coroutines.delay(1000)
+                        manager.connectRemote()
+                    } catch (e2: Exception) {
+                        manager.startPairing()
+                    }
                 }
             }
         } else {
@@ -116,11 +121,22 @@ class TvRemoteViewModel(application: Application) : AndroidViewModel(application
                     try {
                         manager.connectRemote()
                     } catch (e: Exception) {
-                        manager.startPairing()
+                        try {
+                            kotlinx.coroutines.delay(1000)
+                            manager.connectRemote()
+                        } catch (e2: Exception) {
+                            manager.startPairing()
+                        }
                     }
                 }
             }
         }
+    }
+
+    fun disconnect(context: Context) {
+        TvConnectionManagerInstance.manager?.disconnect()
+        val intent = Intent(context, TvConnectionService::class.java).apply { action = "STOP_SERVICE" }
+        context.startService(intent)
     }
 
     fun sendPairingCode(code: String) {

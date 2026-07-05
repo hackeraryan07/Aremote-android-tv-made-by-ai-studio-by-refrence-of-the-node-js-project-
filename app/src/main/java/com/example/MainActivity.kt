@@ -183,6 +183,14 @@ fun TvRemoteApp(viewModel: TvRemoteViewModel = viewModel()) {
                     titleContentColor = MaterialTheme.colorScheme.onBackground
                 ),
                 actions = {
+                    if (connectionState == "CONNECTED") {
+                        IconButton(onClick = { viewModel.disconnect(context) }) {
+                            Icon(
+                                imageVector = Icons.Rounded.Close,
+                                contentDescription = "Disconnect"
+                            )
+                        }
+                    }
                     IconButton(onClick = { showIpDialog = true }) {
                         Icon(
                             imageVector = Icons.Rounded.Cast,
