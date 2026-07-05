@@ -52,16 +52,19 @@ enum class TvCommand {
 }
 
 class TvRemoteViewModel : ViewModel() {
-    // Conceptual IP address of the TV
-    private val tvConnectionManager = TvConnectionManager("192.168.1.100")
-    
-    val connectionState: StateFlow<String> = tvConnectionManager.connectionState
-        .map { it.name }
-        .stateIn(viewModelScope, SharingStarted.Lazily, TvConnectionManager.ConnectionState.DISCONNECTED.name)
+    private val _ipAddress = MutableStateFlow("")
+    val ipAddress: StateFlow<String> = _ipAddress.asStateFlow()
+
+    private var tvConnectionManager: TvConnectionManager? = null
+
+    private val _connectionState = MutableStateFlow(TvConnectionManager.ConnectionState.DISCONNECTED.name)
+    val connectionState: StateFlow<String> = _connectionState.asStateFlow()
+
+    fun updateIpAddress(ip: String) {
+        _ipAddress.value = ip
+    }
 
     fun sendCommand(command: TvCommand) {
-        // Map UI commands to Android TV KeyCodes
-        // Equivalent to RemoteKeyCode in Node.js reference
         val keyCode = when(command) {
             TvCommand.UP -> 19
             TvCommand.DOWN -> 20
@@ -74,25 +77,34 @@ class TvRemoteViewModel : ViewModel() {
             TvCommand.VOLUME_UP -> 24
             TvCommand.VOLUME_DOWN -> 25
             TvCommand.MUTE -> 164
-            TvCommand.KEYBOARD -> -1 // Special handling for string injection
+            TvCommand.KEYBOARD -> -1 
             TvCommand.VOICE -> 219
         }
         
         if (keyCode != -1) {
-            tvConnectionManager.sendKey(keyCode)
+            tvConnectionManager?.sendKey(keyCode)
         }
     }
 
     fun connect() {
+        if (_ipAddress.value.isBlank()) return
+        
         viewModelScope.launch {
-            // Initiate the pairing sequence
-            tvConnectionManager.startPairing()
-            
-            // In a real implementation, you would prompt the user for the code here.
-            // For mock purposes, we pretend the code was entered:
-            delay(1000) 
-            tvConnectionManager.sendPairingCode("123456")
-            tvConnectionManager.connectRemote()
+            if (tvConnectionManager == null || tvConnectionManager?.host != _ipAddress.value) {
+                tvConnectionManager = TvConnectionManager(_ipAddress.value)
+                tvConnectionManager?.connectionState?.collect { state ->
+                    _connectionState.value = state.name
+                }
+            }
+            tvConnectionManager?.startPairing()
+        }
+    }
+
+    fun sendPairingCode(code: String) {
+        viewModelScope.launch {
+            tvConnectionManager?.sendPairingCode(code)
+            delay(500)
+            tvConnectionManager?.connectRemote()
         }
     }
 }
@@ -113,7 +125,66 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun TvRemoteApp(viewModel: TvRemoteViewModel = viewModel()) {
     val connectionState by viewModel.connectionState.collectAsState()
+    val ipAddress by viewModel.ipAddress.collectAsState()
     val context = LocalContext.current
+    var showIpDialog by remember { mutableStateOf(false) }
+    var showPairingDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(connectionState) {
+        if (connectionState == "PAIRING") {
+            showPairingDialog = true
+        } else if (connectionState == "CONNECTED") {
+            showPairingDialog = false
+        }
+    }
+
+    if (showIpDialog) {
+        var tempIp by remember { mutableStateOf(ipAddress) }
+        AlertDialog(
+            onDismissRequest = { showIpDialog = false },
+            title = { Text("Connect to TV") },
+            text = {
+                OutlinedTextField(
+                    value = tempIp,
+                    onValueChange = { tempIp = it },
+                    label = { Text("TV IP Address") },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.updateIpAddress(tempIp)
+                    viewModel.connect()
+                    showIpDialog = false
+                }) { Text("Connect") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showIpDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    if (showPairingDialog) {
+        var pairingCode by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { },
+            title = { Text("Pairing") },
+            text = {
+                OutlinedTextField(
+                    value = pairingCode,
+                    onValueChange = { pairingCode = it },
+                    label = { Text("Enter 6-digit code shown on TV") },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.sendPairingCode(pairingCode)
+                }) { Text("Pair") }
+            }
+        )
+    }
+
     val vibrator = remember {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
             val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
@@ -143,11 +214,11 @@ fun TvRemoteApp(viewModel: TvRemoteViewModel = viewModel()) {
                     titleContentColor = MaterialTheme.colorScheme.onBackground
                 ),
                 actions = {
-                    IconButton(onClick = { viewModel.connect() }) {
+                    IconButton(onClick = { showIpDialog = true }) {
                         Icon(
                             imageVector = Icons.Rounded.Cast,
                             contentDescription = "Connect to TV",
-                            tint = if (connectionState == "Connected") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground
+                            tint = if (connectionState == "CONNECTED") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground
                         )
                     }
                 }
@@ -165,9 +236,9 @@ fun TvRemoteApp(viewModel: TvRemoteViewModel = viewModel()) {
         ) {
             // Connection Status
             Text(
-                text = connectionState,
+                text = if (connectionState == "CONNECTED") "Connected to $ipAddress" else "Status: $connectionState",
                 style = MaterialTheme.typography.labelLarge,
-                color = if (connectionState == "Connected") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                color = if (connectionState == "CONNECTED") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
             )
             
             // Top Controls (Power & Keyboard)
