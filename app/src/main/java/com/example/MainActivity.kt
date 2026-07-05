@@ -73,6 +73,7 @@ fun TvRemoteApp(viewModel: TvRemoteViewModel = viewModel()) {
     val context = LocalContext.current
     var showIpDialog by remember { mutableStateOf(false) }
     var showPairingDialog by remember { mutableStateOf(false) }
+    var showGestureScreen by remember { mutableStateOf(false) }
 
     LaunchedEffect(connectionState) {
         if (connectionState == "PAIRING") {
@@ -174,6 +175,9 @@ fun TvRemoteApp(viewModel: TvRemoteViewModel = viewModel()) {
         viewModel.sendCommand(command)
     }
 
+    if (showGestureScreen) {
+        GestureScreen(viewModel = viewModel, onBack = { showGestureScreen = false })
+    } else {
     Scaffold(
         topBar = {
             TopAppBar(
@@ -191,6 +195,12 @@ fun TvRemoteApp(viewModel: TvRemoteViewModel = viewModel()) {
                             )
                         }
                     }
+                    IconButton(onClick = { showGestureScreen = true }) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.PanTool,
+                                            contentDescription = "Gesture Control"
+                                        )
+                                    }
                     IconButton(onClick = { showIpDialog = true }) {
                         Icon(
                             imageVector = Icons.Rounded.Cast,
@@ -278,6 +288,7 @@ fun TvRemoteApp(viewModel: TvRemoteViewModel = viewModel()) {
         }
     }
 }
+    }
 
 @Composable
 fun DPad(onCommand: (TvCommand) -> Unit) {
