@@ -51,63 +51,6 @@ enum class TvCommand {
     KEYBOARD, VOICE
 }
 
-class TvRemoteViewModel : ViewModel() {
-    private val _ipAddress = MutableStateFlow("")
-    val ipAddress: StateFlow<String> = _ipAddress.asStateFlow()
-
-    private var tvConnectionManager: TvConnectionManager? = null
-
-    private val _connectionState = MutableStateFlow(TvConnectionManager.ConnectionState.DISCONNECTED.name)
-    val connectionState: StateFlow<String> = _connectionState.asStateFlow()
-
-    fun updateIpAddress(ip: String) {
-        _ipAddress.value = ip
-    }
-
-    fun sendCommand(command: TvCommand) {
-        val keyCode = when(command) {
-            TvCommand.UP -> 19
-            TvCommand.DOWN -> 20
-            TvCommand.LEFT -> 21
-            TvCommand.RIGHT -> 22
-            TvCommand.OK -> 23
-            TvCommand.BACK -> 4
-            TvCommand.HOME -> 3
-            TvCommand.POWER -> 26
-            TvCommand.VOLUME_UP -> 24
-            TvCommand.VOLUME_DOWN -> 25
-            TvCommand.MUTE -> 164
-            TvCommand.KEYBOARD -> -1 
-            TvCommand.VOICE -> 219
-        }
-        
-        if (keyCode != -1) {
-            tvConnectionManager?.sendKey(keyCode)
-        }
-    }
-
-    fun connect() {
-        if (_ipAddress.value.isBlank()) return
-        
-        viewModelScope.launch {
-            if (tvConnectionManager == null || tvConnectionManager?.host != _ipAddress.value) {
-                tvConnectionManager = TvConnectionManager(_ipAddress.value)
-                tvConnectionManager?.connectionState?.collect { state ->
-                    _connectionState.value = state.name
-                }
-            }
-            tvConnectionManager?.startPairing()
-        }
-    }
-
-    fun sendPairingCode(code: String) {
-        viewModelScope.launch {
-            tvConnectionManager?.sendPairingCode(code)
-            delay(500)
-            tvConnectionManager?.connectRemote()
-        }
-    }
-}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -126,6 +69,7 @@ class MainActivity : ComponentActivity() {
 fun TvRemoteApp(viewModel: TvRemoteViewModel = viewModel()) {
     val connectionState by viewModel.connectionState.collectAsState()
     val ipAddress by viewModel.ipAddress.collectAsState()
+    val discoveredDevices by viewModel.discoveredDevices.collectAsState(initial = emptyList())
     val context = LocalContext.current
     var showIpDialog by remember { mutableStateOf(false) }
     var showPairingDialog by remember { mutableStateOf(false) }
@@ -144,17 +88,42 @@ fun TvRemoteApp(viewModel: TvRemoteViewModel = viewModel()) {
             onDismissRequest = { showIpDialog = false },
             title = { Text("Connect to TV") },
             text = {
-                OutlinedTextField(
-                    value = tempIp,
-                    onValueChange = { tempIp = it },
-                    label = { Text("TV IP Address") },
-                    singleLine = true
-                )
+                Column {
+                    OutlinedTextField(
+                        value = tempIp,
+                        onValueChange = { tempIp = it },
+                        label = { Text("TV IP Address") },
+                        singleLine = true
+                    )
+                    
+                    if (discoveredDevices.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("Discovered TVs:", style = MaterialTheme.typography.labelMedium)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        discoveredDevices.forEach { device ->
+                            Surface(
+                                onClick = {
+                                    viewModel.updateIpAddress(device.ip)
+                                    viewModel.connect(context)
+                                    showIpDialog = false
+                                },
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Text(device.name, fontWeight = FontWeight.Bold)
+                                    Text(device.ip, style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                        }
+                    }
+                }
             },
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.updateIpAddress(tempIp)
-                    viewModel.connect()
+                    viewModel.connect(context)
                     showIpDialog = false
                 }) { Text("Connect") }
             },

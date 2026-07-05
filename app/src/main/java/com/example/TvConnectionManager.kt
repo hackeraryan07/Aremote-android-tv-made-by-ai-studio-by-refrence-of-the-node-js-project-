@@ -169,14 +169,15 @@ class TvConnectionManager(val host: String) {
 
     private fun getRsaModulusAndExponent(cert: X509Certificate): Pair<ByteArray, ByteArray> {
         val pubKey = cert.publicKey as java.security.interfaces.RSAPublicKey
-        val mod = pubKey.modulus.toByteArray()
-        val exp = pubKey.publicExponent.toByteArray()
-        
-        // Remove leading zero if present for modulus
-        val finalMod = if (mod.isNotEmpty() && mod[0] == 0.toByte()) mod.copyOfRange(1, mod.size) else mod
-        // Remove leading zero for exponent if present
-        val finalExp = if (exp.isNotEmpty() && exp[0] == 0.toByte()) exp.copyOfRange(1, exp.size) else exp
-        return Pair(finalMod, finalExp)
+        var mod = pubKey.modulus.toByteArray()
+        if (mod.size > 256 && mod[0] == 0.toByte()) {
+            mod = mod.copyOfRange(1, mod.size)
+        }
+        var exp = pubKey.publicExponent.toByteArray()
+        if (exp.size > 3 && exp[0] == 0.toByte()) {
+            exp = exp.copyOfRange(1, exp.size)
+        }
+        return Pair(mod, exp)
     }
 
     suspend fun sendPairingCode(code: String) = withContext(Dispatchers.IO) {
@@ -252,6 +253,14 @@ class TvConnectionManager(val host: String) {
         } catch (e: Exception) {
             e.printStackTrace()
         }
+    }
+
+    fun disconnect() {
+        try {
+            pairingSocket?.close()
+            remoteSocket?.close()
+            _connectionState.value = ConnectionState.DISCONNECTED
+        } catch (e: Exception) { e.printStackTrace() }
     }
 
     fun sendKey(keyCode: Int, direction: Int = 1) {
