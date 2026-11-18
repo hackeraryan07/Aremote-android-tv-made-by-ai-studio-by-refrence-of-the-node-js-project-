@@ -68,19 +68,18 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun TvRemoteApp(viewModel: TvRemoteViewModel = viewModel()) {
     val connectionState by viewModel.connectionState.collectAsState()
+    val statusMessage by viewModel.statusMessage.collectAsState()
+    val pairingError by viewModel.pairingError.collectAsState()
     val ipAddress by viewModel.ipAddress.collectAsState()
     val discoveredDevices by viewModel.discoveredDevices.collectAsState(initial = emptyList())
     val context = LocalContext.current
     var showIpDialog by remember { mutableStateOf(false) }
     var showPairingDialog by remember { mutableStateOf(false) }
+    var showKeyboardDialog by remember { mutableStateOf(false) }
     var showGestureScreen by remember { mutableStateOf(false) }
 
     LaunchedEffect(connectionState) {
-        if (connectionState == "PAIRING") {
-            showPairingDialog = true
-        } else if (connectionState == "CONNECTED" || connectionState == "ERROR" || connectionState == "DISCONNECTED") {
-            showPairingDialog = false
-        }
+        showPairingDialog = (connectionState == "PAIRING")
     }
 
     if (showIpDialog) {
@@ -96,7 +95,7 @@ fun TvRemoteApp(viewModel: TvRemoteViewModel = viewModel()) {
                         label = { Text("TV IP Address") },
                         singleLine = true
                     )
-                    
+
                     if (discoveredDevices.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(16.dp))
                         Text("Discovered TVs:", style = MaterialTheme.typography.labelMedium)
@@ -122,11 +121,20 @@ fun TvRemoteApp(viewModel: TvRemoteViewModel = viewModel()) {
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
-                    viewModel.updateIpAddress(tempIp)
-                    viewModel.connect(context)
-                    showIpDialog = false
-                }) { Text("Connect") }
+                Row {
+                    if (tempIp.isNotBlank()) {
+                        TextButton(onClick = {
+                            viewModel.updateIpAddress(tempIp)
+                            viewModel.pair(context)
+                            showIpDialog = false
+                        }) { Text("Re-pair") }
+                    }
+                    TextButton(onClick = {
+                        viewModel.updateIpAddress(tempIp)
+                        viewModel.connect(context)
+                        showIpDialog = false
+                    }) { Text("Connect") }
+                }
             },
             dismissButton = {
                 TextButton(onClick = { showIpDialog = false }) { Text("Cancel") }
@@ -137,20 +145,78 @@ fun TvRemoteApp(viewModel: TvRemoteViewModel = viewModel()) {
     if (showPairingDialog) {
         var pairingCode by remember { mutableStateOf("") }
         AlertDialog(
-            onDismissRequest = { },
-            title = { Text("Pairing") },
+            onDismissRequest = { viewModel.disconnect(context) },
+            title = { Text("Pair with TV") },
             text = {
-                OutlinedTextField(
-                    value = pairingCode,
-                    onValueChange = { pairingCode = it },
-                    label = { Text("Enter 6-digit code shown on TV") },
-                    singleLine = true
-                )
+                Column {
+                    OutlinedTextField(
+                        value = pairingCode,
+                        onValueChange = { pairingCode = it },
+                        label = { Text("6-character code shown on TV (0-9, A-F)") },
+                        singleLine = true,
+                        isError = pairingError != null
+                    )
+                    if (pairingError != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = pairingError!!,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
             },
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.sendPairingCode(pairingCode)
                 }) { Text("Pair") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    viewModel.disconnect(context)
+                }) { Text("Cancel") }
+            }
+        )
+    }
+
+    if (showKeyboardDialog) {
+        var textInput by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showKeyboardDialog = false },
+            title = { Text("Send Text to TV") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = textInput,
+                        onValueChange = { textInput = it },
+                        label = { Text("Type text") },
+                        singleLine = true
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        OutlinedButton(onClick = {
+                            viewModel.sendKeyCode(remote.Remotemessage.RemoteKeyCode.KEYCODE_DEL_VALUE)
+                        }) { Text("Backspace") }
+                        OutlinedButton(onClick = {
+                            viewModel.sendKeyCode(remote.Remotemessage.RemoteKeyCode.KEYCODE_ENTER_VALUE)
+                        }) { Text("Enter") }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (textInput.isNotEmpty()) {
+                        viewModel.sendText(textInput)
+                        textInput = ""
+                    }
+                    showKeyboardDialog = false
+                }) { Text("Send") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showKeyboardDialog = false }) { Text("Close") }
             }
         )
     }
@@ -172,7 +238,11 @@ fun TvRemoteApp(viewModel: TvRemoteViewModel = viewModel()) {
             @Suppress("DEPRECATION")
             vibrator.vibrate(50)
         }
-        viewModel.sendCommand(command)
+        if (command == TvCommand.KEYBOARD) {
+            showKeyboardDialog = true
+        } else {
+            viewModel.sendCommand(command)
+        }
     }
 
     if (showGestureScreen) {
@@ -222,11 +292,29 @@ fun TvRemoteApp(viewModel: TvRemoteViewModel = viewModel()) {
             verticalArrangement = Arrangement.SpaceEvenly
         ) {
             // Connection Status
-            Text(
-                text = if (connectionState == "CONNECTED") "Connected to $ipAddress" else "Status: $connectionState",
-                style = MaterialTheme.typography.labelLarge,
-                color = if (connectionState == "CONNECTED") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = when (connectionState) {
+                        "CONNECTED" -> "Connected to $ipAddress"
+                        "CONNECTING" -> "Connecting to $ipAddress..."
+                        else -> "Status: $connectionState"
+                    },
+                    style = MaterialTheme.typography.labelLarge,
+                    color = if (connectionState == "CONNECTED") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (statusMessage != null && connectionState == "ERROR") {
+                    Text(
+                        text = statusMessage!!,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+                if ((connectionState == "DISCONNECTED" || connectionState == "ERROR") && ipAddress.isNotBlank()) {
+                    TextButton(onClick = { viewModel.connect(context) }) {
+                        Text("Reconnect to $ipAddress")
+                    }
+                }
+            }
             
             // Top Controls (Power & Keyboard)
             Row(

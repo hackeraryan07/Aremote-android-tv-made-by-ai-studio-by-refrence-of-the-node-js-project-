@@ -39,6 +39,8 @@ fun GestureScreen(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
+    androidx.activity.compose.BackHandler(onBack = onBack)
+
     var recognizedGesture by remember { mutableStateOf("Waiting for gesture...") }
     var lastGestureTime by remember { mutableStateOf(0L) }
 
